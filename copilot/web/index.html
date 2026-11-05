@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Project Copilot</title>
+<style>
+:root{--bg:#f6f7f9;--fg:#1c2127;--mut:#5f6b7a;--card:#fff;--bd:#d8dde3;--ac:#2458d3;--warn:#a15c00;--code:#eef1f5}
+@media (prefers-color-scheme:dark){:root{--bg:#14171b;--fg:#e6e9ee;--mut:#9aa5b3;--card:#1d2127;--bd:#2f3640;--ac:#6c9bff;--warn:#e0a24a;--code:#262c34}}
+*{box-sizing:border-box}body{margin:0;font:15px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--fg)}
+header{display:flex;gap:12px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--bd);background:var(--card)}
+header h1{font-size:16px;margin:0;flex:1}select,input,textarea,button{font:inherit;color:inherit;background:var(--card);border:1px solid var(--bd);border-radius:6px;padding:7px 10px}
+button{cursor:pointer;background:var(--ac);color:#fff;border-color:var(--ac)}button.sec{background:var(--card);color:var(--fg);border-color:var(--bd)}
+button:disabled{opacity:.6;cursor:wait}
+main{max-width:860px;margin:0 auto;padding:16px}#log{display:flex;flex-direction:column;gap:12px;min-height:50vh}
+.msg{padding:10px 14px;border:1px solid var(--bd);border-radius:10px;background:var(--card);white-space:pre-wrap;overflow-wrap:anywhere}
+.msg.user{align-self:flex-end;background:var(--ac);color:#fff;border-color:var(--ac);max-width:80%}
+.meta{font-size:12px;color:var(--mut);margin-top:6px}.warn{color:var(--warn)}
+pre{background:var(--code);padding:8px 10px;border-radius:6px;overflow:auto;white-space:pre}code{background:var(--code);padding:1px 4px;border-radius:4px}
+.cite{color:var(--ac);font-size:13px}
+form#send{display:flex;gap:8px;margin-top:14px}form#send textarea{flex:1;resize:vertical;min-height:44px}
+#login{max-width:340px;margin:12vh auto;display:flex;flex-direction:column;gap:10px;padding:20px;border:1px solid var(--bd);border-radius:10px;background:var(--card)}
+.hidden{display:none!important}#status{font-size:12px;color:var(--mut)}
+</style>
+</head>
+<body>
+<form id="login" autocomplete="on">
+  <h1 style="margin:0">Project Copilot</h1>
+  <input id="u" placeholder="Username" autocomplete="username" required>
+  <input id="p" type="password" placeholder="Password" autocomplete="current-password" required>
+  <button>Masuk</button><div id="lerr" class="warn"></div>
+</form>
+<div id="app" class="hidden">
+<header><h1>Project Copilot</h1><span id="status"></span>
+  <label>Peran <select id="skill"></select></label><button class="sec" id="out">Keluar</button></header>
+<main><div id="log"></div>
+<form id="send"><textarea id="q" placeholder="Tanya tentang project… (Enter kirim, Shift+Enter baris baru)" required></textarea><button id="go">Kirim</button></form></main>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>s.replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function render(t){
+  let h=esc(t);
+  h=h.replace(/```(\w*)\n([\s\S]*?)```/g,(m,l,c)=>`<pre data-lang="${l}"><code>${c}</code></pre>`);
+  h=h.replace(/`([^`\n]+)`/g,"<code>$1</code>").replace(/\*\*([^*\n]+)\*\*/g,"<b>$1</b>");
+  h=h.replace(/\[([^\[\]\n]+?:L\d+(?:-L?\d+)?|commit:[0-9a-f]{7,40})\]/g,'<span class="cite">[$1]</span>');
+  return h;
+}
+async function api(path,opt){const r=await fetch(path,{credentials:"same-origin",headers:{"Content-Type":"application/json"},...opt});
+  if(r.status===401){show(false);throw new Error("login");}return r;}
+function add(cls,html,meta){const d=document.createElement("div");d.className="msg "+cls;d.innerHTML=html;
+  if(meta){const m=document.createElement("div");m.className="meta";m.innerHTML=meta;d.appendChild(m);}
+  $("log").appendChild(d);d.scrollIntoView({block:"end"});return d;}
+function metaOf(skill,sources,warnings){
+  let s=`peran: ${esc(skill||"-")}`;
+  if(sources&&sources.length)s+=" · sumber: "+sources.map(x=>x.type==="file"?`${esc(x.path)}:L${x.start_line}-L${x.end_line}`:`commit ${esc(x.hash)}`).join(", ");
+  if(warnings&&warnings.length)s+=`<br><span class="warn">⚠ ${warnings.map(esc).join("; ")}</span>`;return s;}
+function show(on){$("login").classList.toggle("hidden",on);$("app").classList.toggle("hidden",!on);}
+async function init(){
+  try{const me=await (await api("/api/me")).json();show(true);
+    const sk=await (await api("/api/skills")).json();
+    $("skill").innerHTML='<option value="auto">Otomatis</option>'+sk.map(s=>`<option value="${s.name}" title="${esc(s.description)}">${esc(s.title)}</option>`).join("");
+    const st=await (await api("/api/status")).json();$("status").textContent=`${me.username} (${me.role}) · ${st.repos} repo · ${st.files} file · ${st.commits} commit`;
+    const hist=await (await api("/api/history")).json();$("log").innerHTML="";
+    hist.forEach(m=>add(m.role==="user"?"user":"bot",render(m.content),m.role==="user"?null:metaOf(m.skill,(m.meta||{}).sources,(m.meta||{}).warnings)));
+  }catch(e){show(false);}
+}
+$("login").onsubmit=async e=>{e.preventDefault();$("lerr").textContent="";
+  const r=await fetch("/api/login",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:$("u").value,password:$("p").value})});
+  if(r.ok){$("p").value="";init();}else $("lerr").textContent=(await r.json()).detail||"Gagal masuk";};
+$("out").onclick=async()=>{await api("/api/logout",{method:"POST"}).catch(()=>{});show(false);};
+async function send(){const q=$("q").value.trim();if(!q)return;$("q").value="";add("user",esc(q));$("go").disabled=true;
+  const wait=add("bot","Menelusuri project…");
+  try{const r=await api("/api/chat",{method:"POST",body:JSON.stringify({message:q,skill:$("skill").value})});
+    const j=await r.json();wait.remove();
+    if(!r.ok)add("bot",`<span class="warn">${esc(j.detail||"Gagal")}</span>`);
+    else{const d=add("bot",render(j.answer),metaOf(j.skill,j.sources,j.warnings));
+      d.querySelectorAll("pre[data-lang=mermaid]").forEach(p=>{p.insertAdjacentHTML("beforebegin",'<div class="meta">Diagram Mermaid (salin ke mermaid.live untuk dirender):</div>')});}
+  }catch(e){wait.remove();}finally{$("go").disabled=false;}}
+$("send").onsubmit=e=>{e.preventDefault();send();};
+$("q").addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();}});
+init();
+</script>
+</body>
+</html>

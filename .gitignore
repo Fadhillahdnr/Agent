@@ -1,0 +1,9 @@
+.env
+__pycache__/
+.pytest_cache/
+examples/*/.git/
+examples/*/.env
+examples/*/deploy.pem
+examples/*/logo.bin
+examples/*/node_modules/
+examples/*/dist/

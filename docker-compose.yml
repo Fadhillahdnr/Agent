@@ -1,0 +1,67 @@
+name: project-copilot
+
+x-app: &app
+  image: project-copilot:local
+  restart: unless-stopped
+  env_file: .env
+  environment: &appenv
+    DATABASE_URL: postgresql://copilot:${POSTGRES_PASSWORD:?isi POSTGRES_PASSWORD di .env}@db:5432/copilot
+    PROJECT_ROOT: /project
+  read_only: true
+  tmpfs: [/tmp]
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: copilot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?isi POSTGRES_PASSWORD di .env}
+      POSTGRES_DB: copilot
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U copilot -d copilot"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    <<: *app
+    build: .
+    ports: ["127.0.0.1:${WEB_PORT:-8080}:8000"]   # hanya localhost
+    volumes: ["${PROJECTS_PATH:?isi PROJECTS_PATH di .env}:/project:ro"]
+    depends_on: {db: {condition: service_healthy}}
+    healthcheck:
+      test: ["CMD", "python", "-m", "copilot.healthcheck", "api"]
+      interval: 15s
+      timeout: 6s
+      retries: 5
+      start_period: 40s
+
+  worker:
+    <<: *app
+    command: ["python", "-m", "copilot.worker"]
+    volumes: ["${PROJECTS_PATH:?isi PROJECTS_PATH di .env}:/project:ro"]
+    depends_on: {db: {condition: service_healthy}}
+    healthcheck:
+      test: ["CMD", "python", "-m", "copilot.healthcheck", "worker"]
+      interval: 30s
+      timeout: 8s
+      retries: 5
+      start_period: 120s
+
+  telegram:
+    <<: *app
+    command: ["python", "-m", "copilot.telegram_bot"]
+    depends_on: {api: {condition: service_healthy}}
+    healthcheck:
+      test: ["CMD", "python", "-m", "copilot.healthcheck", "telegram"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  pgdata:
